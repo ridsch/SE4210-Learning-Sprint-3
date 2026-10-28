@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Side-Channel & Complexity Interactive Lab</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 850px; margin: 40px auto; padding: 0 20px; line-height: 1.5; background: #f8fafc; color: #1e293b; }
+    h1 { color: #0f172a; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; }
+    .card { background: white; padding: 24px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 24px; }
+    label { font-weight: 600; display: block; margin-top: 12px; }
+    input[type="text"], select { width: 100%; padding: 10px; margin: 6px 0 16px; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box; font-family: monospace; }
+    button { background: #2563eb; color: white; border: none; padding: 10px 18px; border-radius: 6px; cursor: pointer; font-weight: 600; margin-right: 8px; }
+    button:hover { background: #1d4ed8; }
+    .terminal { background: #0f172a; color: #38bdf8; padding: 16px; border-radius: 6px; font-family: monospace; font-size: 14px; min-height: 140px; white-space: pre-wrap; overflow-x: auto; }
+    .meter-container { background: #e2e8f0; border-radius: 4px; height: 12px; width: 100%; overflow: hidden; margin-top: 8px; }
+    .meter-bar { height: 100%; background: #ef4444; width: 0%; transition: width 0.3s ease; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; background: #e0f2fe; color: #0369a1; }
+  </style>
+</head>
+<body>
+
+  <h1>Interactive Side-Channel Attack Visualizer</h1>
+  <p>Learn how timing and mismatch metrics unintentionally leak sensitive values one character at a time.</p>
+
+  <div class="card">
+    <span class="badge">Side-Channel Oracle (Problem 2 Simulation)</span>
+    <label for="secretKey">Target Secret Key (Hidden from Attacker in real life):</label>
+    <input type="text" id="secretKey" value="ISU_CYBER_2026" />
+
+    <label for="comparisonMode">Comparison Implementation:</label>
+    <select id="comparisonMode">
+      <option value="leaky">Vulnerable: Leaks Mismatch Count & Character Timing</option>
+      <option value="constant">Secure: Constant-Time Comparison (Crypto-Safe)</option>
+    </select>
+
+    <label for="candidateInput">Candidate Guess:</label>
+    <input type="text" id="candidateInput" value="AAA_AAAAA_AAAA" placeholder="Type candidate string..." />
+
+    <button onclick="testCandidate()">Submit Single Guess</button>
+    <button onclick="runAutoAttacker()">Launch Automated Side-Channel Attack</button>
+
+    <div style="margin-top: 16px;">
+      <strong>Execution Cycles / Metric Leakage:</strong>
+      <div class="meter-container"><div id="meter" class="meter-bar"></div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <strong>Oracle Output & Telemetry Console:</strong>
+    <div id="console" class="terminal">[System Ready] Enter a candidate string or run the automated attacker...</div>
+  </div>
+
+  <script>
+    function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+    function log(msg) {
+      const c = document.getElementById('console');
+      c.textContent += "\n" + msg;
+      c.scrollTop = c.scrollHeight;
+    }
+
+    function clearLog() { document.getElementById('console').textContent = ""; }
+
+    function oracle(candidate, secret, mode) {
+      if (candidate.length !== secret.length) {
+        return { success: false, lengthError: true, diffCount: -1, latency: 1 };
+      }
+      let diffCount = 0;
+      let latency = 0;
+
+      for (let i = 0; i < secret.length; i++) {
+        if (mode === 'leaky') {
+          // Vulnerable: Timing & mismatch counts directly expose internal state
+          if (candidate[i] !== secret[i]) {
+            diffCount++;
+            latency += 5; // Simulates observable branch misprediction / cycle penalties
+          } else {
+            latency += 1;
+          }
+        } else {
+          // Secure: Bitwise accumulation avoids data-dependent branch leakage
+          diffCount |= (candidate.charCodeAt(i) ^ secret.charCodeAt(i));
+          latency = 10;
+        }
+      }
+      return {
+        success: (mode === 'leaky' ? diffCount === 0 : diffCount === 0),
+        lengthError: false,
+        diffCount: (mode === 'leaky' ? diffCount : (diffCount === 0 ? 0 : -1)),
+        latency: latency
+      };
+    }
+
+    function testCandidate() {
+      const secret = document.getElementById('secretKey').value;
+      const guess = document.getElementById('candidateInput').value;
+      const mode = document.getElementById('comparisonMode').value;
+      const result = oracle(guess, secret, mode);
+
+      clearLog();
+      log(`> Testing candidate: "${guess}" (Length: ${guess.length})`);
+      if (result.lengthError) {
+        log(`[-] REJECTED: Input length must match secret length (${secret.length}).`);
+        document.getElementById('meter').style.width = "5%";
+        return;
+      }
+      if (mode === 'leaky') {
+        log(`[*] Side-Channel Response -> Sleeping for: ${result.diffCount} seconds (Mismatches: ${result.diffCount})`);
+        log(`[*] Observed Telemetry Latency: ~${result.latency}ms`);
+        document.getElementById('meter').style.width = Math.min(100, result.latency * 2) + "%";
+      } else {
+        log(`[*] Constant-Time Oracle: Result returned in standard time slice (~${result.latency}ms).`);
+        log(`[*] No difference metrics disclosed.`);
+        document.getElementById('meter').style.width = "25%";
+      }
+      log(result.success ? "[+] SUCCESS: Access Granted!" : "[-] FAIL: Invalid credentials.");
+    }
+
+    async function runAutoAttacker() {
+      const secret = document.getElementById('secretKey').value;
+      const mode = document.getElementById('comparisonMode').value;
+      clearLog();
+
+      if (mode === 'constant') {
+        log("[!] Attack Aborted: Target is utilizing constant-time comparison. No side-channel feedback available.");
+        return;
+      }
+
+      log(`[*] Initiating AI Automated Side-Channel Driver against target length: ${secret.length}`);
+      const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_";
+      let candidate = Array(secret.length).fill('A');
+
+      let baseline = oracle(candidate.join(''), secret, mode).diffCount;
+      log(`[*] Baseline string: "${candidate.join('')}" -> Initial Mismatches: ${baseline}`);
+
+      for (let i = 0; i < candidate.length; i++) {
+        let found = false;
+        for (let char of charset) {
+          const original = candidate[i];
+          candidate[i] = char;
+          const currentGuess = candidate.join('');
+          document.getElementById('candidateInput').value = currentGuess;
+
+          const res = oracle(currentGuess, secret, mode);
+          if (res.diffCount < baseline) {
+            baseline = res.diffCount;
+            log(`[+] Position ${i} solved! Found: '${char}' (Remaining errors: ${baseline})`);
+            found = true;
+            await sleep(60);
+            break;
+          }
+          candidate[i] = original;
+        }
+      }
+
+      log(`\n[✔] Attack Complete! Secret key recovered: "${candidate.join('')}"`);
+    }
+  </script>
+</body>
+</html>
