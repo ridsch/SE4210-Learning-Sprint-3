@@ -1,7 +1,3 @@
----
-
-### 3. Sprint Reflection Document:
-
 # Learning Sprint #3: Reflection
 
 ### Deepening Conceptual Understanding
